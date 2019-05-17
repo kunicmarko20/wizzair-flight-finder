@@ -12,6 +12,11 @@ fn main() {
         .expect("Failed to deserialize the metadata.");
 
     let mut metadata = metadata.chars();
+
+    // https://tools.ietf.org/html/rfc7159#section-8.1
+    // Implementations MUST NOT add a byte order mark to the beginning
+    //
+    // But hey, who follows standards?
     metadata.next();
 
     let metadata: Metadata = serde_json::from_str(metadata.as_str()).unwrap();
@@ -64,6 +69,9 @@ struct Flights {
 impl Flights {
     const INVALID_FLIGHT_PRICE: f64 = 0.0;
 
+    // Better return flights for all days
+    // even if there are no flights on some days
+    // but wait, lets put a price 0.0 there
     fn remove_invalid_flights(&mut self) {
         self.outbound_flights
             .retain(|flight| flight.price() != Flights::INVALID_FLIGHT_PRICE);
