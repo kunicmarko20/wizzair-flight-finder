@@ -1,0 +1,12 @@
+[package]
+name = "wizz"
+version = "0.1.0"
+authors = ["Marko Kunic <kunicmarko20@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+reqwest = "0.9.17"
+serde = "1.0.91"
+serde_derive = "1.0.91"
+serde_json = "1.0.39"
+chrono = { version = "0.4.6" , features = ["serde"]}
