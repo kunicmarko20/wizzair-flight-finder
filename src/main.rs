@@ -1,6 +1,9 @@
 #[macro_use] extern crate serde_derive;
 
+mod serde;
+
 use reqwest::Client;
+use chrono::{DateTime, Utc};
 
 const METADATA_URL: &str = "https://wizzair.com/static/metadata.json";
 const FARE_CHART_ENDPOINT: &str = "/asset/farechart";
@@ -87,7 +90,8 @@ struct Flight {
     departure_station: String,
     #[serde(rename = "arrivalStation")]
     arrival_station: String,
-    date: String,
+    #[serde(with = "serde::date")]
+    date: DateTime<Utc>,
     price: Price,
 }
 
