@@ -3,10 +3,10 @@
 mod serde;
 
 use reqwest::Client;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Datelike, Weekday};
 
 const METADATA_URL: &str = "https://wizzair.com/static/metadata.json";
-const FARE_CHART_ENDPOINT: &str = "/asset/farechart";
+const SEARCH_TIMETABLE_ENDPOINT: &str = "/search/timetable";
 
 fn main() {
     let metadata = reqwest::get(METADATA_URL)
@@ -24,23 +24,24 @@ fn main() {
 
     let metadata: Metadata = serde_json::from_str(metadata.as_str()).unwrap();
 
-    let mut flights: Flights = Client::new().post(&(metadata.api_url + FARE_CHART_ENDPOINT))
+    let flights: Flights = Client::new().post(&(metadata.api_url + SEARCH_TIMETABLE_ENDPOINT))
         .body(r#"{
-            "isRescueFare": false,
             "adultCount": 1,
             "childCount": 0,
-            "dayInterval": 3,
-            "wdc": true,
+            "infantCount": 0,
+            "priceType": "wdc",
             "flightList": [
                 {
                     "departureStation": "LTN",
                     "arrivalStation": "BEG",
-                    "date": "2019-06-13"
+                    "from": "2019-06-01",
+                    "to": "2019-06-30"
                 },
                 {
-                    "departureStation": "BEG",
-                    "arrivalStation": "LTN",
-                    "date": "2019-06-16"
+                    "departureStation": "LTN",
+                    "arrivalStation": "BEG",
+                    "from": "2019-06-01",
+                    "to": "2019-06-30"
                 }
             ]
         }"#)
@@ -50,9 +51,29 @@ fn main() {
         .json()
         .expect("Failed to deserialize flights.");
 
-    flights.remove_invalid_flights();
+    let mut matched_flights = Vec::new();
 
-    dbg!(flights);
+    for outbound_flight in &flights.outbound_flights {
+        match outbound_flight.departure_date.weekday() {
+            Weekday::Tue | Weekday::Sun => continue,
+            _ => ()
+        }
+
+        for return_flight in &flights.return_flights {
+            if let Weekday::Sat = return_flight.departure_date.weekday() {
+                continue;
+            }
+
+            let difference_in_days = return_flight
+                .departure_date
+                .signed_duration_since(outbound_flight.departure_date)
+                .num_days();
+
+            if difference_in_days >= 2 && difference_in_days < 4 {
+                matched_flights.push(FlightMatch(outbound_flight, return_flight));
+            }
+        }
+    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -69,29 +90,14 @@ struct Flights {
     return_flights: Vec<Flight>,
 }
 
-impl Flights {
-    const INVALID_FLIGHT_PRICE: f64 = 0.0;
-
-    // Better return flights for all days
-    // even if there are no flights on some days
-    // but wait, lets put a price 0.0 there
-    fn remove_invalid_flights(&mut self) {
-        self.outbound_flights
-            .retain(|flight| flight.price() != Flights::INVALID_FLIGHT_PRICE);
-
-        self.return_flights
-            .retain(|flight| flight.price() != Flights::INVALID_FLIGHT_PRICE);
-    }
-}
-
 #[derive(Deserialize, Debug)]
 struct Flight {
     #[serde(rename = "departureStation")]
     departure_station: String,
     #[serde(rename = "arrivalStation")]
     arrival_station: String,
-    #[serde(with = "serde::date")]
-    date: DateTime<Utc>,
+    #[serde(with = "serde::departure_dates", rename = "departureDates")]
+    departure_date: DateTime<Utc>,
     price: Price,
 }
 
@@ -100,8 +106,35 @@ impl Flight {
         self.price.amount
     }
 }
+
 #[derive(Deserialize, Debug)]
 struct Price {
     amount: f64,
 }
 
+#[derive(Debug)]
+struct FlightMatch<'a>(&'a Flight, &'a Flight);
+
+trait ExpandDateTime {
+    fn is_leap_year(&self) -> bool;
+
+    fn last_day_of_month(&self) -> u32;
+}
+
+impl ExpandDateTime for DateTime<Utc> {
+    fn is_leap_year(&self) -> bool {
+        self.naive_utc().year() % 4 == 0 && (self.naive_utc().year() % 100 != 0 || self.naive_utc().year() % 400 == 0)
+    }
+
+    fn last_day_of_month(&self) -> u32 {
+        match self.naive_utc().month() {
+            4 | 6 | 9 | 11 => 30,
+            2 => if self.is_leap_year() {
+                29
+            } else {
+                28
+            },
+            _ => 31,
+        }
+    }
+}

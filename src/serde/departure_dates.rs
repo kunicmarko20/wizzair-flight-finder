@@ -9,6 +9,6 @@ pub fn deserialize<'de, D>(
     where
         D: Deserializer<'de>,
 {
-    let date = String::deserialize(deserializer)?;
-    Utc.datetime_from_str(&date, FORMAT).map_err(serde::de::Error::custom)
+    let mut dates: Vec<String> = Vec::deserialize(deserializer)?;
+    Utc.datetime_from_str(dates.pop().expect("Date is missing.").as_str(), FORMAT).map_err(serde::de::Error::custom)
 }
