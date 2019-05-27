@@ -1,9 +1,13 @@
 #[macro_use] extern crate serde_derive;
+#[macro_use] extern crate serde_json;
 
+mod chrono;
 mod serde;
 
 use reqwest::Client;
-use chrono::{DateTime, Utc, Datelike, Weekday};
+use ::chrono::{DateTime, Utc, Datelike, Weekday};
+use crate::chrono::LastDayOfMonth;
+use std::collections::HashMap;
 
 const METADATA_URL: &str = "https://wizzair.com/static/metadata.json";
 const SEARCH_TIMETABLE_ENDPOINT: &str = "/search/timetable";
@@ -23,56 +27,69 @@ fn main() {
     metadata.next();
 
     let metadata: Metadata = serde_json::from_str(metadata.as_str()).unwrap();
+    let search_timetable_url = &(metadata.api_url + SEARCH_TIMETABLE_ENDPOINT);
 
-    let flights: Flights = Client::new().post(&(metadata.api_url + SEARCH_TIMETABLE_ENDPOINT))
-        .body(r#"{
-            "adultCount": 1,
-            "childCount": 0,
-            "infantCount": 0,
-            "priceType": "wdc",
-            "flightList": [
-                {
-                    "departureStation": "LTN",
-                    "arrivalStation": "BEG",
-                    "from": "2019-06-01",
-                    "to": "2019-06-30"
-                },
-                {
-                    "departureStation": "LTN",
-                    "arrivalStation": "BEG",
-                    "from": "2019-06-01",
-                    "to": "2019-06-30"
+    let mut matched_flights_per_month: HashMap<u32, Vec<FlightMatch>> = HashMap::new();
+
+    for i in 2..=4 {
+        let current_time = Utc::now();
+        let current_time = current_time.with_month(current_time.month() + i).unwrap();
+        let from = format!("{}-{}-01", current_time.year(), current_time.month());
+        let to = format!("{}-{}-{}", current_time.year(), current_time.month(), current_time.last_day_of_month());
+
+        let mut flights: Flights = Client::new().post(search_timetable_url)
+            .body(json!({
+                "adultCount": 1,
+                "childCount": 0,
+                "infantCount": 0,
+                "priceType": "wdc",
+                "flightList": [
+                    {
+                        "departureStation": "LTN",
+                        "arrivalStation": "BEG",
+                        "from": from,
+                        "to": to
+                    },
+                    {
+                        "departureStation": "LTN",
+                        "arrivalStation": "BEG",
+                        "from": from,
+                        "to": to
+                    }
+                ]
+            }).to_string())
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .send()
+            .expect("Failed to fetch flights.")
+            .json()
+            .expect("Failed to deserialize flights.");
+
+        let mut matched_flights = Vec::new();
+
+        for outbound_flight in flights.outbound_flights {
+            match outbound_flight.departure_date.weekday() {
+                Weekday::Tue | Weekday::Sun => continue,
+                _ => ()
+            }
+
+            for (index, return_flight) in flights.return_flights.iter().enumerate() {
+                if let Weekday::Sat = return_flight.departure_date.weekday() {
+                    continue;
                 }
-            ]
-        }"#)
-        .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .send()
-        .expect("Failed to fetch flights.")
-        .json()
-        .expect("Failed to deserialize flights.");
 
-    let mut matched_flights = Vec::new();
+                let difference_in_days = return_flight
+                    .departure_date
+                    .signed_duration_since(outbound_flight.departure_date)
+                    .num_days();
 
-    for outbound_flight in &flights.outbound_flights {
-        match outbound_flight.departure_date.weekday() {
-            Weekday::Tue | Weekday::Sun => continue,
-            _ => ()
-        }
-
-        for return_flight in &flights.return_flights {
-            if let Weekday::Sat = return_flight.departure_date.weekday() {
-                continue;
-            }
-
-            let difference_in_days = return_flight
-                .departure_date
-                .signed_duration_since(outbound_flight.departure_date)
-                .num_days();
-
-            if difference_in_days >= 2 && difference_in_days < 4 {
-                matched_flights.push(FlightMatch(outbound_flight, return_flight));
+                if difference_in_days >= 2 && difference_in_days < 4 {
+                    matched_flights.push(FlightMatch(outbound_flight, flights.return_flights.swap_remove(index)));
+                    break;
+                }
             }
         }
+
+        matched_flights_per_month.insert(i, matched_flights);
     }
 }
 
@@ -113,28 +130,4 @@ struct Price {
 }
 
 #[derive(Debug)]
-struct FlightMatch<'a>(&'a Flight, &'a Flight);
-
-trait ExpandDateTime {
-    fn is_leap_year(&self) -> bool;
-
-    fn last_day_of_month(&self) -> u32;
-}
-
-impl ExpandDateTime for DateTime<Utc> {
-    fn is_leap_year(&self) -> bool {
-        self.naive_utc().year() % 4 == 0 && (self.naive_utc().year() % 100 != 0 || self.naive_utc().year() % 400 == 0)
-    }
-
-    fn last_day_of_month(&self) -> u32 {
-        match self.naive_utc().month() {
-            4 | 6 | 9 | 11 => 30,
-            2 => if self.is_leap_year() {
-                29
-            } else {
-                28
-            },
-            _ => 31,
-        }
-    }
-}
+struct FlightMatch(Flight, Flight);
