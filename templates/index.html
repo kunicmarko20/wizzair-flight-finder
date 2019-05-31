@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+{% for month, flights in matched_flights %}
+    {{ month }} <br/><br/>
+    {{ flights.outbound_flight.departureStation }} : {{ flights.outbound_flight.departureDates }} : {{ flights.outbound_flight.price.amount }} + {{ flights.return_flight.departureStation }} : {{ flights.return_flight.departureDates }} : {{ flights.return_flight.price.amount }}
+
+{% endfor %}
+</body>
+</html>

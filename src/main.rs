@@ -1,5 +1,7 @@
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate serde_json;
+#[macro_use] extern crate lazy_static;
+#[macro_use] extern crate tera;
 
 mod chrono;
 mod serde;
@@ -8,9 +10,19 @@ use reqwest::Client;
 use ::chrono::{DateTime, Utc, Datelike, Weekday};
 use crate::chrono::LastDayOfMonth;
 use std::collections::HashMap;
+use lettre::{SmtpClient, SendableEmail, Transport, Envelope, EmailAddress};
+use lettre::smtp::extension::ClientId;
+use lettre::smtp::authentication::{Credentials, Mechanism};
+use lettre::smtp::ConnectionReuseParameters;
+use tera::{Tera, Context};
+use lettre_email::EmailBuilder;
 
 const METADATA_URL: &str = "https://wizzair.com/static/metadata.json";
 const SEARCH_TIMETABLE_ENDPOINT: &str = "/search/timetable";
+
+lazy_static! {
+    pub static ref TERA: Tera = compile_templates!("templates/**/*");
+}
 
 fn main() {
     let metadata = reqwest::get(METADATA_URL)
@@ -31,11 +43,12 @@ fn main() {
 
     let mut matched_flights_per_month: HashMap<u32, Vec<FlightMatch>> = HashMap::new();
 
+    let current_time = Utc::now();
+
     for i in 2..=4 {
-        let current_time = Utc::now();
-        let current_time = current_time.with_month(current_time.month() + i).unwrap();
-        let from = format!("{}-{}-01", current_time.year(), current_time.month());
-        let to = format!("{}-{}-{}", current_time.year(), current_time.month(), current_time.last_day_of_month());
+        let month = current_time.with_day(1).unwrap().with_month(current_time.month() + i).unwrap();
+        let from = format!("{}-{}-01", month.year(), month.month());
+        let to = format!("{}-{}-{}", month.year(), month.month(), month.last_day_of_month());
 
         let mut flights: Flights = Client::new().post(search_timetable_url)
             .body(json!({
@@ -51,8 +64,8 @@ fn main() {
                         "to": to
                     },
                     {
-                        "departureStation": "LTN",
-                        "arrivalStation": "BEG",
+                        "departureStation": "BEG",
+                        "arrivalStation": "LTN",
                         "from": from,
                         "to": to
                     }
@@ -83,14 +96,38 @@ fn main() {
                     .num_days();
 
                 if difference_in_days >= 2 && difference_in_days < 4 {
-                    matched_flights.push(FlightMatch(outbound_flight, flights.return_flights.swap_remove(index)));
+                    matched_flights.push(FlightMatch{outbound_flight, return_flight: flights.return_flights.swap_remove(index)});
                     break;
                 }
             }
         }
 
-        matched_flights_per_month.insert(i, matched_flights);
+        matched_flights_per_month.insert(month.month(), matched_flights);
     }
+
+    let mut mailer = SmtpClient::new_simple(env!("SMTP_HOST")).unwrap()
+        .credentials(
+            Credentials::new(
+            env!("SMTP_USERNAME").to_string(),
+            env!("SMTP_PASSWORD").to_string()
+            )
+        )
+        .smtp_utf8(true)
+        .authentication_mechanism(Mechanism::Plain)
+        .connection_reuse(ConnectionReuseParameters::ReuseUnlimited).transport();
+
+    let mut context = Context::new();
+    context.insert("matched_flights", &matched_flights_per_month);
+
+    let email = EmailBuilder::new()
+        .from("noreply@wizzair-flight-finder.rs".to_string())
+        .to("kunicmarko20@gmail.com".to_string())
+        .subject("Wizzair Flight Finder")
+        .html(TERA.render("index.html", &context).unwrap())
+        .build()
+        .expect("Unable to build email.");
+
+    mailer.send(email.into());
 }
 
 #[derive(Deserialize, Debug)]
@@ -107,27 +144,22 @@ struct Flights {
     return_flights: Vec<Flight>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Flight {
     #[serde(rename = "departureStation")]
     departure_station: String,
-    #[serde(rename = "arrivalStation")]
-    arrival_station: String,
     #[serde(with = "serde::departure_dates", rename = "departureDates")]
     departure_date: DateTime<Utc>,
     price: Price,
 }
 
-impl Flight {
-    fn price(&self) -> f64 {
-        self.price.amount
-    }
-}
-
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Price {
     amount: f64,
 }
 
-#[derive(Debug)]
-struct FlightMatch(Flight, Flight);
+#[derive(Serialize, Debug)]
+struct FlightMatch {
+    outbound_flight: Flight,
+    return_flight: Flight,
+}
