@@ -1,11 +1,41 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <style>
+        table {
+            font-family: arial, sans-serif;
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        td, th {
+            border: 1px solid #dddddd;
+            text-align: left;
+            padding: 8px;
+        }
+
+        tr:nth-child(even) {
+            background-color: #dddddd;
+        }
+    </style>
+</head>
 <body>
-
-{% for month, flights in matched_flights %}
-    {{ month }} <br/><br/>
-    {{ flights.outbound_flight.departureStation }} : {{ flights.outbound_flight.departureDates }} : {{ flights.outbound_flight.price.amount }} + {{ flights.return_flight.departureStation }} : {{ flights.return_flight.departureDates }} : {{ flights.return_flight.price.amount }}
-
-{% endfor %}
+    {% for month, matched_flights in matched_flights_per_month %}
+        <h3>{{ month }}</h3>
+        <table>
+            <tr>
+                <th>Outbound</th>
+                <th>Return</th>
+                <th>Price</th>
+            </tr>
+            {% for flights in matched_flights %}
+                <tr>
+                    <td>{{ flights.outbound_flight.departureStation }}, {{ flights.outbound_flight.departureDates }}</td>
+                    <td>{{ flights.return_flight.departureStation }}, {{ flights.return_flight.departureDates }}</td>
+                    <td>{{ flights.outbound_flight.price.amount + flights.return_flight.price.amount }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+    {% endfor %}
 </body>
 </html>

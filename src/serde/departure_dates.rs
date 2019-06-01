@@ -1,7 +1,9 @@
 use chrono::{DateTime, Utc, TimeZone};
 use serde::{self, Deserialize, Deserializer, Serializer};
 
-const FORMAT: &'static str = "%Y-%m-%dT%H:%M:%S";
+const FORMAT_INPUT: &'static str = "%Y-%m-%dT%H:%M:%S";
+
+const FORMAT_OUTPUT: &'static str = "%d-%m-%Y, %A at %H:%M";
 
 pub fn deserialize<'de, D>(
     deserializer: D,
@@ -10,7 +12,7 @@ pub fn deserialize<'de, D>(
         D: Deserializer<'de>,
 {
     let mut dates: Vec<String> = Vec::deserialize(deserializer)?;
-    Utc.datetime_from_str(dates.pop().expect("Date is missing.").as_str(), FORMAT).map_err(serde::de::Error::custom)
+    Utc.datetime_from_str(dates.pop().expect("Date is missing.").as_str(), FORMAT_INPUT).map_err(serde::de::Error::custom)
 }
 
 pub fn serialize<S>(
@@ -20,6 +22,6 @@ pub fn serialize<S>(
     where
         S: Serializer,
 {
-    let s = format!("{}", date.format(FORMAT));
+    let s = format!("{}", date.format(FORMAT_OUTPUT));
     serializer.serialize_str(&s)
 }

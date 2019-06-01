@@ -41,10 +41,11 @@ fn main() {
     let metadata: Metadata = serde_json::from_str(metadata.as_str()).unwrap();
     let search_timetable_url = &(metadata.api_url + SEARCH_TIMETABLE_ENDPOINT);
 
-    let mut matched_flights_per_month: HashMap<u32, Vec<FlightMatch>> = HashMap::new();
+    let mut matched_flights_per_month: HashMap<String, Vec<FlightMatch>> = HashMap::new();
 
     let current_time = Utc::now();
 
+    //date is gonna fail after 12
     for i in 2..=4 {
         let month = current_time.with_day(1).unwrap().with_month(current_time.month() + i).unwrap();
         let from = format!("{}-{}-01", month.year(), month.month());
@@ -102,14 +103,14 @@ fn main() {
             }
         }
 
-        matched_flights_per_month.insert(month.month(), matched_flights);
+        matched_flights_per_month.insert(month.format("%B").to_string(), matched_flights);
     }
 
     let mut mailer = SmtpClient::new_simple(env!("SMTP_HOST")).unwrap()
         .credentials(
             Credentials::new(
-            env!("SMTP_USERNAME").to_string(),
-            env!("SMTP_PASSWORD").to_string()
+                env!("SMTP_USERNAME").to_string(),
+                env!("SMTP_PASSWORD").to_string()
             )
         )
         .smtp_utf8(true)
@@ -117,7 +118,7 @@ fn main() {
         .connection_reuse(ConnectionReuseParameters::ReuseUnlimited).transport();
 
     let mut context = Context::new();
-    context.insert("matched_flights", &matched_flights_per_month);
+    context.insert("matched_flights_per_month", &matched_flights_per_month);
 
     let email = EmailBuilder::new()
         .from("noreply@wizzair-flight-finder.rs".to_string())
