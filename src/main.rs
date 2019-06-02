@@ -10,12 +10,13 @@ use reqwest::Client;
 use ::chrono::{DateTime, Utc, Datelike, Weekday};
 use crate::chrono::LastDayOfMonth;
 use std::collections::HashMap;
-use lettre::{SmtpClient, SendableEmail, Transport, Envelope, EmailAddress};
-use lettre::smtp::extension::ClientId;
+use lettre::{SmtpClient, Transport};
 use lettre::smtp::authentication::{Credentials, Mechanism};
 use lettre::smtp::ConnectionReuseParameters;
 use tera::{Tera, Context};
 use lettre_email::EmailBuilder;
+use std::thread;
+use arc_guard::ArcGuard;
 
 const METADATA_URL: &str = "https://wizzair.com/static/metadata.json";
 const SEARCH_TIMETABLE_ENDPOINT: &str = "/search/timetable";
@@ -39,20 +40,27 @@ fn main() {
     metadata.next();
 
     let metadata: Metadata = serde_json::from_str(metadata.as_str()).unwrap();
-    let search_timetable_url = &(metadata.api_url + SEARCH_TIMETABLE_ENDPOINT);
+    let search_timetable_url = metadata.api_url + SEARCH_TIMETABLE_ENDPOINT;
 
-    let mut matched_flights_per_month: HashMap<String, Vec<FlightMatch>> = HashMap::new();
+    let matched_flights_per_month = ArcGuard::new(HashMap::new());
 
     let current_time = Utc::now();
 
+    let mut threads = vec![];
     //date is gonna fail after 12
     for i in 2..=4 {
-        let month = current_time.with_day(1).unwrap().with_month(current_time.month() + i).unwrap();
-        let from = format!("{}-{}-01", month.year(), month.month());
-        let to = format!("{}-{}-{}", month.year(), month.month(), month.last_day_of_month());
+        let i = i.clone();
+        let search_timetable_url = search_timetable_url.clone();
+        let current_time = current_time.clone();
+        let matched_flights_per_month = matched_flights_per_month.clone();
 
-        let mut flights: Flights = Client::new().post(search_timetable_url)
-            .body(json!({
+        threads.push(thread::spawn(move|| {
+            let month = current_time.with_day(1).unwrap().with_month(current_time.month() + i).unwrap();
+            let from = format!("{}-{}-01", month.year(), month.month());
+            let to = format!("{}-{}-{}", month.year(), month.month(), month.last_day_of_month());
+
+            let mut flights: Flights = Client::new().post(&search_timetable_url)
+                .body(json!({
                 "adultCount": 1,
                 "childCount": 0,
                 "infantCount": 0,
@@ -72,38 +80,46 @@ fn main() {
                     }
                 ]
             }).to_string())
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .send()
-            .expect("Failed to fetch flights.")
-            .json()
-            .expect("Failed to deserialize flights.");
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .send()
+                .expect("Failed to fetch flights.")
+                .json()
+                .expect("Failed to deserialize flights.");
 
-        let mut matched_flights = Vec::new();
+            let mut matched_flights = Vec::new();
 
-        for outbound_flight in flights.outbound_flights {
-            match outbound_flight.departure_date.weekday() {
-                Weekday::Tue | Weekday::Sun => continue,
-                _ => ()
-            }
-
-            for (index, return_flight) in flights.return_flights.iter().enumerate() {
-                if let Weekday::Sat = return_flight.departure_date.weekday() {
-                    continue;
+            for outbound_flight in flights.outbound_flights {
+                match outbound_flight.departure_date.weekday() {
+                    Weekday::Tue | Weekday::Sun => continue,
+                    _ => ()
                 }
 
-                let difference_in_days = return_flight
-                    .departure_date
-                    .signed_duration_since(outbound_flight.departure_date)
-                    .num_days();
+                for (index, return_flight) in flights.return_flights.iter().enumerate() {
+                    if let Weekday::Sat = return_flight.departure_date.weekday() {
+                        continue;
+                    }
 
-                if difference_in_days >= 2 && difference_in_days < 4 {
-                    matched_flights.push(FlightMatch{outbound_flight, return_flight: flights.return_flights.swap_remove(index)});
-                    break;
+                    let difference_in_days = return_flight
+                        .departure_date
+                        .signed_duration_since(outbound_flight.departure_date)
+                        .num_days();
+
+                    if difference_in_days >= 2 && difference_in_days < 4 {
+                        matched_flights.push(FlightMatch{outbound_flight, return_flight: flights.return_flights.swap_remove(index)});
+                        break;
+                    }
                 }
             }
-        }
 
-        matched_flights_per_month.insert(month.format("%B").to_string(), matched_flights);
+            let matched_flights_per_month = matched_flights_per_month.arc();
+            let mut matched_flights_per_month = matched_flights_per_month.lock().expect("Unable to lock Matched Flights Per Month.");
+            matched_flights_per_month.insert(month.format("%B").to_string(), matched_flights);
+        }));
+    }
+
+    for thread in threads {
+        // Wait for the thread to finish. Returns a result.
+        let _ = thread.join();
     }
 
     let mut mailer = SmtpClient::new_simple(env!("SMTP_HOST")).unwrap()
@@ -118,7 +134,8 @@ fn main() {
         .connection_reuse(ConnectionReuseParameters::ReuseUnlimited).transport();
 
     let mut context = Context::new();
-    context.insert("matched_flights_per_month", &matched_flights_per_month);
+    let matched_flights_per_month = matched_flights_per_month.arc();
+    context.insert("matched_flights_per_month", &*matched_flights_per_month.lock().expect("Unable to lock Matched Flights Per Month."));
 
     let email = EmailBuilder::new()
         .from("noreply@wizzair-flight-finder.rs".to_string())
@@ -128,7 +145,7 @@ fn main() {
         .build()
         .expect("Unable to build email.");
 
-    mailer.send(email.into());
+    mailer.send(email.into()).unwrap();
 }
 
 #[derive(Deserialize, Debug)]
