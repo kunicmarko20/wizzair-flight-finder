@@ -1,7 +1,6 @@
+#[macro_use] extern crate lambda_runtime as lambda;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate serde_json;
-#[macro_use] extern crate lazy_static;
-#[macro_use] extern crate tera;
 
 mod chrono;
 mod serde;
@@ -17,15 +16,21 @@ use tera::{Tera, Context};
 use lettre_email::EmailBuilder;
 use std::thread;
 use arc_guard::ArcGuard;
+use lambda_runtime::error::HandlerError;
+use std::error::Error;
+use serde_json::Value;
+use std::str;
 
 const METADATA_URL: &str = "https://wizzair.com/static/metadata.json";
 const SEARCH_TIMETABLE_ENDPOINT: &str = "/search/timetable";
+const TEMPLATE: &'static str = include_str!("../templates/index.html");
 
-lazy_static! {
-    pub static ref TERA: Tera = compile_templates!("templates/**/*");
+fn main() -> Result<(), Box<dyn Error>> {
+    lambda!(run);
+    Ok(())
 }
 
-fn main() {
+fn run(_: Value, _: lambda::Context) -> Result<(), HandlerError> {
     let metadata = reqwest::get(METADATA_URL)
         .expect("Failed to fetch the current metadata.")
         .text()
@@ -141,11 +146,13 @@ fn main() {
         .from("noreply@wizzair-flight-finder.rs".to_string())
         .to("kunicmarko20@gmail.com".to_string())
         .subject("Wizzair Flight Finder")
-        .html(TERA.render("index.html", &context).unwrap())
+        .html(Tera::one_off(TEMPLATE, &context, true).unwrap())
         .build()
         .expect("Unable to build email.");
 
     mailer.send(email.into()).unwrap();
+
+    Ok(())
 }
 
 #[derive(Deserialize, Debug)]
