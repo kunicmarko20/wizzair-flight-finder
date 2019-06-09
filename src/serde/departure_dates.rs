@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc, TimeZone};
 use serde::{self, Deserialize, Deserializer, Serializer};
 
-const FORMAT_INPUT: &'static str = "%Y-%m-%dT%H:%M:%S";
+const FORMAT_INPUT: &str = "%Y-%m-%dT%H:%M:%S";
 
-const FORMAT_OUTPUT: &'static str = "%d-%m-%Y, %A at %H:%M";
+const FORMAT_OUTPUT: &str = "%d-%m-%Y, %A at %H:%M";
 
 pub fn deserialize<'de, D>(
     deserializer: D,
@@ -22,6 +22,5 @@ pub fn serialize<S>(
     where
         S: Serializer,
 {
-    let s = format!("{}", date.format(FORMAT_OUTPUT));
-    serializer.serialize_str(&s)
+    serializer.serialize_str(&format!("{}", date.format(FORMAT_OUTPUT)))
 }
