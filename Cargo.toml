@@ -1,5 +1,5 @@
 [package]
-name = "wizz"
+name = "wizzair-flight-finder"
 version = "0.1.0"
 authors = ["Marko Kunic <kunicmarko20@gmail.com>"]
 edition = "2018"
