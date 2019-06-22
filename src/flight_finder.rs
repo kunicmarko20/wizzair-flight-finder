@@ -9,17 +9,21 @@ use crate::renderer::Renderer;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
 use chrono::DateTime;
+use std::env;
 
 pub fn run() {
     let mut thread_pool = ThreadPool::default();
     let (sender, receiver): (Sender<(String, Vec<FlightMatch>)>, Receiver<(String, Vec<FlightMatch>)>) = mpsc::channel();
 
-    for i in 2..=4 {
+    let start_month = env::var("START_MONTH").unwrap().parse::<u32>().expect("Not a number.");
+    let end_month = start_month + env::var("NUMBER_OF_MONTHS").unwrap().parse::<u32>().expect("Not a number.");
+
+    for i in start_month..=end_month {
         let i = i.clone();
         let sender = sender.clone();
 
         thread_pool.spawn(move|| {
-            let mut search_month = search_month(i);
+            let search_month = search_month(i);
 
             let from = format!("{}-{}-01", search_month.year(), search_month.month());
             let to = format!("{}-{}-{}", search_month.year(), search_month.month(), search_month.last_day_of_month());
@@ -35,7 +39,7 @@ pub fn run() {
 
     let mut matched_flights_per_month = HashMap::new();
 
-    for _ in 1..=3 {
+    for _ in start_month..=end_month {
         let matched_flights = receiver.recv().expect("Unable to receive flight match.");
         matched_flights_per_month.insert(matched_flights.0, matched_flights.1);
     }
