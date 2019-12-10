@@ -9,13 +9,14 @@ impl FlightMatcher {
 
         for outbound_flight in flights.outbound_flights {
             match outbound_flight.departure_date.weekday() {
-                Weekday::Tue | Weekday::Sun => continue,
-                _ => ()
+                Weekday::Fri => (),
+                _ => continue
             }
 
             for (index, return_flight) in flights.return_flights.iter().enumerate() {
-                if let Weekday::Sat = return_flight.departure_date.weekday() {
-                    continue;
+                match outbound_flight.departure_date.weekday() {
+                    Weekday::Mon => (),
+                    _ => continue
                 }
 
                 let difference_in_days = return_flight
@@ -23,7 +24,7 @@ impl FlightMatcher {
                     .signed_duration_since(outbound_flight.departure_date)
                     .num_days();
 
-                if !(difference_in_days == 2 || difference_in_days == 3) {
+                if difference_in_days > 3 {
                     continue;
                 }
 
